@@ -146,7 +146,7 @@ class TestVotingLogic:
 
     def test_lgbm_rf_alert(self):
         score = 0.40 * 1 + 0.20 * 1 + 0.40 * 0
-        assert score == 0.60
+        assert abs(score - 0.60) < 1e-9
         assert score >= 0.50
 
     def test_if_only_no_alert(self):
