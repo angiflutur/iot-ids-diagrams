@@ -1,0 +1,55 @@
+@startuml
+title IoT IDS System Architecture
+
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontSize 12
+skinparam componentStyle rectangle
+
+node "WiFi Network" {
+    node "ESP32 + AM2320\n192.168.100.25" as ESP {
+        component "MQTT Publisher\nevery 5 seconds" as PUB
+    }
+    node "Attacker Laptop\n192.168.100.91" as ATK {
+        component "7 Attack Scripts\nbenchmark_runner.py" as BENCH
+    }
+}
+
+node "Raspberry Pi 5 — 192.168.100.24" as PI {
+    component "Mosquitto Broker\nPort 1883\nauth required" as BROKER
+
+    package "ids_deployment.py — 3 Threads" {
+        component "Thread 1\nPCAP Capture\ninterface=any" as T1
+        component "Thread 2\nMQTT Subscriber\npaho-mqtt" as T2
+        component "Thread 3\nIDS Engine\nWeighted Voting" as T3
+        database "pcap_buffer\ndeque(10000)" as BUF
+        queue "mqtt_queue\nQueue(1000)" as Q
+    }
+
+    package "ML Models — 17 features" {
+        component "LightGBM\nMulticlass 8 classes\nw=0.40" as LGBM
+        component "Random Forest\nBinary detection\nw=0.20" as RF
+        component "Isolation Forest\nUnsupervised\nw=0.40" as IF
+    }
+
+    component "ids_logger.py" as LOGGER
+    database "ids_predictions.csv" as CSV
+}
+
+PUB --> BROKER : MQTT publish\niot/sensors/environmental
+BENCH --> BROKER : TCP/MQTT attacks
+BROKER --> T2 : subscribe #
+T1 --> BUF : capture packets\ntcp port 1883
+T2 --> Q : 17 features dict
+BUF --> Q : get_pcap_features(t-5s,t)
+Q --> T3 : consume
+T3 --> LGBM : predict()
+T3 --> RF : predict()
+T3 --> IF : predict()
+LGBM --> T3 : label + conf
+RF --> T3 : is_attack + conf
+IF --> T3 : is_attack + score
+T3 --> BROKER : publish ids/alerts
+BROKER --> LOGGER : ids/alerts
+LOGGER --> CSV : write row
+
+@enduml

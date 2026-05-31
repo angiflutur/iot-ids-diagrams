@@ -1,0 +1,77 @@
+name: Generate Diagrams and Run Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  # ── Job 1: Genereaza PNG din PlantUML ──────────────────────
+  generate-diagrams:
+    name: Generate PlantUML Diagrams
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Java (required for PlantUML)
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Download PlantUML jar
+        run: |
+          wget -q https://github.com/plantuml/plantuml/releases/download/v1.2024.6/plantuml-1.2024.6.jar -O plantuml.jar
+          echo " PlantUML downloaded"
+
+      - name: Generate PNG from all .puml files
+        run: |
+          mkdir -p generated-diagrams
+          for f in diagrams/*.puml; do
+            name=$(basename "$f" .puml)
+            echo "Generating $name.png from $f..."
+            java -jar plantuml.jar "$f" -o "../generated-diagrams"
+            echo " $name.png generated"
+          done
+          echo ""
+          echo "Generated files:"
+          ls -la generated-diagrams/
+
+      - name: Upload diagrams as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-diagrams
+          path: generated-diagrams/
+          retention-days: 30
+
+  # ── Job 2: Ruleaza testele Python ──────────────────────────
+  run-tests:
+    name: Run Feature Engineering Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install numpy pytest pytest-cov
+
+      - name: Run tests
+        run: |
+          pytest tests/test_features.py -v --tb=short
+
+      - name: Show coverage
+        run: |
+          pytest tests/test_features.py \
+            --cov=tests \
+            --cov-report=term-missing \
+            -q

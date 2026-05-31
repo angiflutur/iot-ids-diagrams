@@ -1,0 +1,66 @@
+@startuml
+title ML Ensemble — Weighted Voting Decision Logic
+
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontSize 12
+
+start
+
+:Input: Feature Vector 17D\n(RobustScaler applied);
+
+fork
+    :LightGBM Multiclass\n500 trees, max_depth=6\n8 classes;
+    if (label != legitimate?) then (YES)
+        :v_LGBM = 1\ncontrib = 0.40;
+    else (NO)
+        :v_LGBM = 0\ncontrib = 0.00;
+    endif
+fork again
+    :Random Forest Binary\n300 trees, OOB=0.9995\nlegitimate vs attack;
+    if (rf_pred == 1?) then (YES)
+        :v_RF = 1\ncontrib = 0.20;
+    else (NO)
+        :v_RF = 0\ncontrib = 0.00;
+    endif
+fork again
+    :Isolation Forest\n300 trees, cont=0.12\ntrained on legitimate only;
+    if (if_pred == -1?) then (YES)
+        :v_IF = 1\ncontrib = 0.40;
+    else (NO)
+        :v_IF = 0\ncontrib = 0.00;
+    endif
+end fork
+
+:score = 0.40 x v_LGBM\n+ 0.20 x v_RF\n+ 0.40 x v_IF;
+
+note right
+  Possible scores:
+  ALL agree    = 1.00
+  LGBM + IF    = 0.80
+  LGBM + RF    = 0.60
+  RF + IF      = 0.60
+  IF only      = 0.40
+  RF only      = 0.20
+  LGBM only    = 0.40
+end note
+
+if (score >= 0.50?) then (YES — Known Attack)
+    #FF6666:ALERT\nattack_type = lgbm_label\nalert_source = VOTING\npublish to ids/alerts;
+else (NO)
+    if (if_score < -0.10\nAND lgbm=legitimate >= 0.80?) then (YES — Zero-Day)
+        #FF9966:ALERT\nattack_type = unknown_anomaly\nalert_source = IF_ONLY\npublish to ids/alerts;
+    else (NO)
+        #66FF66:LEGITIMATE\nNo alert emitted;
+    endif
+endif
+
+note right
+  IF-only path necessary!
+  Without it: IF alone = 0.40
+  never reaches 0.50 threshold.
+  Zero-day attacks would be missed.
+end note
+
+stop
+
+@enduml

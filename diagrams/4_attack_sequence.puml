@@ -1,0 +1,54 @@
+@startuml
+title Brute Force Attack Detection — Sequence Diagram
+
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontSize 11
+
+actor "Attacker\nLaptop" as ATK
+participant "Network\nWiFi" as NET
+participant "PCAP\nThread" as PCAP
+participant "MQTT\nThread" as MQTT
+participant "IDS\nEngine" as IDS
+participant "Alert\nPublisher" as ALERT
+
+note over ATK, ALERT #FFE0E0
+  Brute Force: 3-4 attempts/second
+  ~847 failed before success
+  Failed attempts INVISIBLE to MQTT!
+end note
+
+loop 847 failed attempts (3-4 per second)
+    ATK -> NET : TCP SYN\nnew src_port each time
+    NET -> PCAP : packet captured\nlength=54B (small SYN)
+    PCAP -> PCAP : append to pcap_buffer\ntcp_reconnect_rate increases
+    NET --> ATK : TCP RST\nauthentication rejected
+    PCAP -> PCAP : RST captured\nlength=54B
+end
+
+note over MQTT #E0FFE0
+  Thread 2 receives
+  ZERO messages
+  during 847 attempts!
+end note
+
+ATK -> NET : TCP SYN (iot-user / shadow200)
+NET --> ATK : TCP ACK — SUCCESS
+ATK -> NET : MQTT PUBLISH\n{attack_type: brute_force}
+NET -> MQTT : on_message() triggered
+
+MQTT -> MQTT : compute MQTT features\niat_log=0.26, json_fc=6...
+MQTT -> PCAP : get_pcap_features(t-5s, t)
+PCAP --> MQTT : pcap_ipt_log=0.001\npcap_syn_ratio=0.89\ntcp_reconnect_rate=0.95
+
+MQTT -> IDS : message dict\n17 features assembled
+
+IDS -> IDS : LightGBM\nbruteforce (conf=0.99)
+IDS -> IDS : Random Forest\nATK (conf=0.98)
+IDS -> IDS : Isolation Forest\nATK (if_score=-0.089)
+IDS -> IDS : score = 0.40+0.20+0.40 = 1.00\n1.00 >= 0.50 ALERT!
+
+IDS -> ALERT : publish_alert\n{attack_type: bruteforce}
+ALERT -> NET : MQTT ids/alerts
+NET -> MQTT : ids_logger.py receives alert
+
+@enduml

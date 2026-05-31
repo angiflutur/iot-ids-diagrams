@@ -1,0 +1,60 @@
+@startuml
+title Data Collection and Training Pipeline
+
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontSize 11
+
+|#FFE0E0| ESP32|
+start
+:Read AM2320 sensor\ntemperature + humidity;
+:Build JSON payload\n{sensor_id, timestamp,\nsequence, data, rssi, errors};
+:MQTT Publish\niot/sensors/environmental\nevery 5 seconds;
+
+|#E0F0FF| Raspberry Pi — Collection|
+:MQTT Subscriber\nCapture rows to CSV\n/mqtt/*.csv;
+:TShark PCAP\nCapture TCP packets\n/packet/*.csv;
+note right
+  8 scenarios:
+  normal, dos_attack,
+  slowrate_attack,
+  malformed_attack,
+  sensor_spoofing_attack,
+  topic_injection_attack,
+  mitm_attack,
+  brute_force_attack
+end note
+
+|#E0FFE0| Google Colab — Preprocessing|
+:Load all MQTT CSVs;
+:build_mqtt_features()\n13 features per message;
+:aggregate_pcap()\n4 PCAP features per 5s window;
+:merge_asof()\nMQTT + PCAP synchronized;
+
+if (dataset == brute_force?) then (YES)
+    :PCAP-only synthetic windows\nMQTT features = 0 neutral\ntcp_reconnect_rate = real value;
+else (NO)
+    :Normal MQTT + PCAP merge;
+endif
+
+:StratifiedShuffleSplit 80/20\nzero overlap verified;
+:Balance: max 6000 per class;
+:RobustScaler fit on TRAIN only;
+:Save train.csv + test.csv;
+
+|#FFF0E0| Google Colab — Training|
+:LightGBM Multiclass\n8 classes, 500 trees\nF1-macro = 0.9982;
+:Random Forest Binary\n300 trees, OOB=0.9995\nFPR=0.18% FNR=0.00%;
+:Isolation Forest\ncont=0.12, legitimate only\nDet=99.3%;
+:Weighted Voting\n0.40+0.20+0.40\nF1-macro = 0.9994;
+:Save models/*.pkl\nto Google Drive;
+
+|#FFE0FF| Raspberry Pi — Deployment|
+:Copy models to Pi\n/home/angelica/Desktop/ids_27/models;
+:Run ids_deployment.py\n3 threads real-time detection;
+:Run ids_logger.py\nBenchmark logging;
+:Run benchmark_runner.py\non Windows laptop\n24h continuous;
+:Analyze with\nbenchmark_analysis.py;
+
+stop
+
+@enduml

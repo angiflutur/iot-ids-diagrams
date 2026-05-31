@@ -1,0 +1,94 @@
+@startuml
+title Feature Engineering Pipeline — 17 Network-Independent Features
+
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontSize 11
+
+rectangle "MQTT Message (raw)" as MQTT_IN #FFE0E0
+rectangle "PCAP Buffer — last 5s" as PCAP_IN #FFE0E0
+
+package "MQTT Features — 13 total" #E0F0FF {
+
+    package "Timing (2)" {
+        rectangle "iat_log\nlog(1+IAT)\nDoS=0.027 vs Legit=1.79" as F1
+        rectangle "burstiness\nstd/mean IAT window=10" as F2
+    }
+
+    package "Protocol (3)" {
+        rectangle "json_field_count\nMITM=9.27 vs Legit=6.97" as F3
+        rectangle "json_valid [BIN]\nMalformed=0" as F4
+        rectangle "errors_flag [BIN]\nerrors>0 → Malformed" as F5
+    }
+
+    package "Topic (2)" {
+        rectangle "topic_is_known [BIN]\nInjection=0" as F6
+        rectangle "topic_depth\nnumber of '/'" as F7
+    }
+
+    package "Sensor Delta (4)" {
+        rectangle "delta_temp_log\nlog(1+|Δtemp|)\nSpoofing=26.1 vs Legit=0.24" as F8
+        rectangle "delta_hum_log\nlog(1+|Δhum|)\nclipped [-10,200]" as F9
+        rectangle "temp_rolling_std\nwindow=5 messages" as F10
+        rectangle "hum_rolling_std\nwindow=5 messages" as F11
+    }
+
+    package "Sequence (2)" {
+        rectangle "seq_gap_clipped\nclip(500) — MITM=71.7" as F12
+        rectangle "seq_backwards [BIN]\nreplay attack=1" as F13
+    }
+}
+
+package "PCAP Features — 4 total" #E0FFE0 {
+    rectangle "pcap_ipt_log\nlog(1+median IPT)\nBF=0.001s vs Legit=2.37s" as F14
+    rectangle "pcap_pkt_size_cv\nstd/mean length\nBF=0.35 vs Legit=1.01" as F15
+    rectangle "pcap_syn_ratio\nP(length<60B)\nBF=0.89 vs Legit=0.50" as F16
+    rectangle "tcp_reconnect_rate\nunique_ports≠1883 / 5s\nBF=0.95 vs Legit=0.25" as F17 #FFE0C0
+}
+
+rectangle "RobustScaler\nfit on TRAIN only\n13 numeric features" as SCALER #FFFFC0
+rectangle "Feature Vector 17D\n→ ML Models" as OUT #C0FFC0
+
+MQTT_IN --> F1
+MQTT_IN --> F2
+MQTT_IN --> F3
+MQTT_IN --> F4
+MQTT_IN --> F5
+MQTT_IN --> F6
+MQTT_IN --> F7
+MQTT_IN --> F8
+MQTT_IN --> F9
+MQTT_IN --> F10
+MQTT_IN --> F11
+MQTT_IN --> F12
+MQTT_IN --> F13
+PCAP_IN --> F14
+PCAP_IN --> F15
+PCAP_IN --> F16
+PCAP_IN --> F17
+F1 --> SCALER
+F2 --> SCALER
+F3 --> SCALER
+F8 --> SCALER
+F9 --> SCALER
+F10 --> SCALER
+F11 --> SCALER
+F12 --> SCALER
+F14 --> SCALER
+F15 --> SCALER
+F16 --> SCALER
+F17 --> SCALER
+F4 --> OUT
+F5 --> OUT
+F6 --> OUT
+F7 --> OUT
+F13 --> OUT
+SCALER --> OUT
+
+note right of F17
+  NEW — introduced to detect
+  Brute Force at TCP level.
+  Network-independent.
+  Not affected by NAT/topology.
+end note
+
+@enduml
