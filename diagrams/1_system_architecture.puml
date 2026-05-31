@@ -3,53 +3,51 @@ title IoT IDS System Architecture
 
 skinparam backgroundColor #FEFEFE
 skinparam defaultFontSize 12
-skinparam componentStyle rectangle
+skinparam sequenceArrowThickness 2
 
-node "WiFi Network" {
-    node "ESP32 + AM2320\n192.168.100.25" as ESP {
-        component "MQTT Publisher\nevery 5 seconds" as PUB
-    }
-    node "Attacker Laptop\n192.168.100.91" as ATK {
-        component "7 Attack Scripts\nbenchmark_runner.py" as BENCH
-    }
-}
+box "WiFi Network" #FFE8E8
+    participant "ESP32\n+ AM2320\n192.168.100.25" as ESP
+    participant "Attacker\nLaptop\n192.168.100.91" as ATK
+end box
 
-node "Raspberry Pi 5 — 192.168.100.24" as PI {
-    component "Mosquitto Broker\nPort 1883\nauth required" as BROKER
+box "Raspberry Pi 5 — 192.168.100.24" #E8F0FF
+    participant "Mosquitto\nBroker\nPort 1883" as BROKER
+    participant "Thread 1\nPCAP\nCapture" as T1
+    participant "Thread 2\nMQTT\nSubscriber" as T2
+    participant "Thread 3\nIDS Engine\n+ Voting" as T3
+    participant "LightGBM\nw=0.40" as LGBM
+    participant "Random\nForest\nw=0.20" as RF
+    participant "Isolation\nForest\nw=0.40" as IF
+    participant "ids_logger\n.py" as LOGGER
+end box
 
-    package "ids_deployment.py — 3 Threads" {
-        component "Thread 1\nPCAP Capture\ninterface=any" as T1
-        component "Thread 2\nMQTT Subscriber\npaho-mqtt" as T2
-        component "Thread 3\nIDS Engine\nWeighted Voting" as T3
-        database "pcap_buffer\ndeque(10000)" as BUF
-        queue "mqtt_queue\nQueue(1000)" as Q
-    }
+ESP -> BROKER : MQTT publish\niot/sensors/environmental\nevery 5 seconds
+ATK -> BROKER : TCP/MQTT attacks\n7 attack types\nport 1883
 
-    package "ML Models — 17 features" {
-        component "LightGBM\nMulticlass 8 classes\nw=0.40" as LGBM
-        component "Random Forest\nBinary detection\nw=0.20" as RF
-        component "Isolation Forest\nUnsupervised\nw=0.40" as IF
-    }
+BROKER -> T2 : subscribe #\nall topics
+BROKER -> T1 : TCP packets\ncaptured via pyshark
 
-    component "ids_logger.py" as LOGGER
-    database "ids_predictions.csv" as CSV
-}
+T1 -> T1 : append to\npcap_buffer\ndeque(10000)
+T2 -> T2 : compute\n13 MQTT features\nFeatureState
 
-PUB --> BROKER : MQTT publish\niot/sensors/environmental
-BENCH --> BROKER : TCP/MQTT attacks
-BROKER --> T2 : subscribe #
-T1 --> BUF : capture packets\ntcp port 1883
-T2 --> Q : 17 features dict
-BUF --> Q : get_pcap_features(t-5s,t)
-Q --> T3 : consume
-T3 --> LGBM : predict()
-T3 --> RF : predict()
-T3 --> IF : predict()
-LGBM --> T3 : label + conf
-RF --> T3 : is_attack + conf
-IF --> T3 : is_attack + score
-T3 --> BROKER : publish ids/alerts
-BROKER --> LOGGER : ids/alerts
-LOGGER --> CSV : write row
+T2 -> T1 : get_pcap_features\n(t-5s, t)
+T1 --> T2 : 4 PCAP features\npcap_ipt_log\ntcp_reconnect_rate
+
+T2 -> T3 : message dict\n17 features total
+
+T3 -> LGBM : predict()
+LGBM --> T3 : label + conf\nvote 0.40
+
+T3 -> RF : predict()
+RF --> T3 : is_attack\nvote 0.20
+
+T3 -> IF : predict()
+IF --> T3 : is_attack\nif_score\nvote 0.40
+
+T3 -> T3 : weighted vote\n0.40+0.20+0.40\nscore >= 0.50?
+
+T3 -> BROKER : publish\nids/alerts
+BROKER -> LOGGER : ids/alerts\nreceived
+LOGGER -> LOGGER : write to\nids_predictions.csv
 
 @enduml

@@ -3,92 +3,67 @@ title Feature Engineering Pipeline — 17 Network-Independent Features
 
 skinparam backgroundColor #FEFEFE
 skinparam defaultFontSize 11
+skinparam SequenceGroupBackgroundColor #F0F8FF
 
-rectangle "MQTT Message (raw)" as MQTT_IN #FFE0E0
-rectangle "PCAP Buffer — last 5s" as PCAP_IN #FFE0E0
+participant "MQTT\nMessage\n(raw)" as MQTT #FFE0E0
+participant "FeatureState\nClass" as FS #E0F0FF
+participant "PCAP\nBuffer\n(last 5s)" as PCAP #E0FFE0
+participant "Feature\nVector\n17D" as OUT #FFFFC0
+participant "RobustScaler\n+ ML Models" as ML #FFE0C0
 
-package "MQTT Features — 13 total" #E0F0FF {
+MQTT -> FS : topic, payload\ntimestamp, sequence
 
-    package "Timing (2)" {
-        rectangle "iat_log\nlog(1+IAT)\nDoS=0.027 vs Legit=1.79" as F1
-        rectangle "burstiness\nstd/mean IAT window=10" as F2
-    }
+group Timing Features (2)
+    FS -> FS : iat_log = log(1+IAT)\nDoS=0.027 vs Legit=1.79
+    FS -> FS : burstiness = std/mean IAT\nwindow=10 messages
+end
 
-    package "Protocol (3)" {
-        rectangle "json_field_count\nMITM=9.27 vs Legit=6.97" as F3
-        rectangle "json_valid [BIN]\nMalformed=0" as F4
-        rectangle "errors_flag [BIN]\nerrors>0 → Malformed" as F5
-    }
+group Protocol Features (3)
+    FS -> FS : json_field_count\nMITM=9.27 vs Legit=6.97
+    FS -> FS : json_valid [BIN]\nMalformed JSON = 0
+    FS -> FS : errors_flag [BIN]\nerrors > 0 = Malformed
+end
 
-    package "Topic (2)" {
-        rectangle "topic_is_known [BIN]\nInjection=0" as F6
-        rectangle "topic_depth\nnumber of '/'" as F7
-    }
+group Topic Features (2)
+    FS -> FS : topic_is_known [BIN]\nInjection = 0
+    FS -> FS : topic_depth\nnumber of slashes
+end
 
-    package "Sensor Delta (4)" {
-        rectangle "delta_temp_log\nlog(1+|Δtemp|)\nSpoofing=26.1 vs Legit=0.24" as F8
-        rectangle "delta_hum_log\nlog(1+|Δhum|)\nclipped [-10,200]" as F9
-        rectangle "temp_rolling_std\nwindow=5 messages" as F10
-        rectangle "hum_rolling_std\nwindow=5 messages" as F11
-    }
+group Sensor Delta Features (4)
+    FS -> FS : delta_temp_log = log(1+|delta_temp|)\nSpoofing=26.1 vs Legit=0.24
+    FS -> FS : delta_hum_log = log(1+|delta_hum|)\nhumidity clipped to [-10, 200]
+    FS -> FS : temp_rolling_std\nwindow=5 messages
+    FS -> FS : hum_rolling_std\nwindow=5 messages
+end
 
-    package "Sequence (2)" {
-        rectangle "seq_gap_clipped\nclip(500) — MITM=71.7" as F12
-        rectangle "seq_backwards [BIN]\nreplay attack=1" as F13
-    }
-}
+group Sequence Features (2)
+    FS -> FS : seq_gap_clipped = clip(500)\nMITM=71.7 vs Normal=0
+    FS -> FS : seq_backwards [BIN]\nreplay attack = 1
+end
 
-package "PCAP Features — 4 total" #E0FFE0 {
-    rectangle "pcap_ipt_log\nlog(1+median IPT)\nBF=0.001s vs Legit=2.37s" as F14
-    rectangle "pcap_pkt_size_cv\nstd/mean length\nBF=0.35 vs Legit=1.01" as F15
-    rectangle "pcap_syn_ratio\nP(length<60B)\nBF=0.89 vs Legit=0.50" as F16
-    rectangle "tcp_reconnect_rate\nunique_ports≠1883 / 5s\nBF=0.95 vs Legit=0.25" as F17 #FFE0C0
-}
+FS -> OUT : 13 MQTT features
 
-rectangle "RobustScaler\nfit on TRAIN only\n13 numeric features" as SCALER #FFFFC0
-rectangle "Feature Vector 17D\n→ ML Models" as OUT #C0FFC0
+PCAP -> PCAP : get_pcap_features\n(window_start, window_end)
 
-MQTT_IN --> F1
-MQTT_IN --> F2
-MQTT_IN --> F3
-MQTT_IN --> F4
-MQTT_IN --> F5
-MQTT_IN --> F6
-MQTT_IN --> F7
-MQTT_IN --> F8
-MQTT_IN --> F9
-MQTT_IN --> F10
-MQTT_IN --> F11
-MQTT_IN --> F12
-MQTT_IN --> F13
-PCAP_IN --> F14
-PCAP_IN --> F15
-PCAP_IN --> F16
-PCAP_IN --> F17
-F1 --> SCALER
-F2 --> SCALER
-F3 --> SCALER
-F8 --> SCALER
-F9 --> SCALER
-F10 --> SCALER
-F11 --> SCALER
-F12 --> SCALER
-F14 --> SCALER
-F15 --> SCALER
-F16 --> SCALER
-F17 --> SCALER
-F4 --> OUT
-F5 --> OUT
-F6 --> OUT
-F7 --> OUT
-F13 --> OUT
-SCALER --> OUT
+group PCAP Features (4) — Network Independent
+    PCAP -> PCAP : pcap_ipt_log = log(1+median_IPT)\nBF=0.001s vs Legit=2.37s
+    PCAP -> PCAP : pcap_pkt_size_cv = std/mean length\nBF=0.35 vs Legit=1.01
+    PCAP -> PCAP : pcap_syn_ratio = P(length < 60B)\nBF=0.89 vs Legit=0.50
+    PCAP -> PCAP : tcp_reconnect_rate = unique_ports/5s\nBF=0.95 vs Legit=0.25\nNEW — Brute Force detector
+end
 
-note right of F17
-  NEW — introduced to detect
-  Brute Force at TCP level.
-  Network-independent.
-  Not affected by NAT/topology.
+PCAP -> OUT : 4 PCAP features
+
+OUT -> ML : 17 features assembled
+ML -> ML : RobustScaler.transform()\n13 numeric features only\n4 binary unchanged
+ML -> ML : predict() x3 models\nweighted vote 0.40+0.20+0.40
+
+note over PCAP
+  tcp_reconnect_rate counts
+  unique source ports != 1883
+  divided by window (5s).
+  Network-independent: works
+  on any WiFi/hotspot topology.
 end note
 
 @enduml
