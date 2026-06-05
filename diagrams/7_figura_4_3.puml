@@ -1,0 +1,39 @@
+@startuml figura_4_3_voting
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+skinparam defaultFontSize 12
+skinparam roundCorner 8
+skinparam shadowing false
+
+title Weighted Voting Decision Mechanism
+
+rectangle "LightGBM\nweight = 0.40" as LGB #d5e8d4
+rectangle "Random Forest\nweight = 0.20" as RF #dae8fc
+rectangle "Isolation Forest\nweight = 0.40" as IF #fff2cc
+
+rectangle "score = 0.40 × v_LGB\n      + 0.20 × v_RF\n      + 0.40 × v_IF" as FORMULA #f5f5f5
+
+diamond "score ≥ 0.50?" as D1
+diamond "IF score < −0.10\nAND\nLGBM confident\n= legitimate?" as D2
+
+rectangle "ALERT\n(known attack)" as A1 #f8cecc
+rectangle "ALERT\n(unknown_anomaly)" as A2 #f8cecc
+rectangle "No alert" as NO #d5e8d4
+
+LGB --> FORMULA
+RF --> FORMULA
+IF --> FORMULA
+FORMULA --> D1
+D1 --> A1 : YES
+D1 --> D2 : NO
+D2 --> A2 : YES
+D2 --> NO : NO
+
+note right of D2
+  Zero-day secondary path:
+  Isolation Forest detects anomaly
+  but supervised models classify
+  input as legitimate
+end note
+
+@enduml
